@@ -199,7 +199,11 @@ describe.skipIf(process.platform !== "win32")(
 
       const commandPrompt =
         process.env.ComSpec ||
-        path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe");
+        path.join(
+          process.env.SystemRoot || "C:\\Windows",
+          "System32",
+          "cmd.exe",
+        );
 
       const execution = run(
         commandPrompt,
