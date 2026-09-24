@@ -25,47 +25,69 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { assertNoBlockedReviewRequests } from "./review-network-policy.mjs";
 
 const APP_DIR = path.resolve(import.meta.dirname, "..");
 
-const PRODUCT_NAME = JSON.parse(
-  readFileSync(path.join(APP_DIR, "code-oss", "product.json"), "utf8"),
-).nameShort;
+function defaultApp() {
+  const directory = path.join(
+    APP_DIR,
+    `VSCode-${process.platform}-${process.arch}`,
+  );
 
-const DEFAULT_APP = path.join(
-  APP_DIR,
-  "VSCode-darwin-arm64",
-  `${PRODUCT_NAME}.app`,
-);
+  if (process.platform !== "darwin") return directory;
+
+  const product = JSON.parse(
+    readFileSync(path.join(APP_DIR, "code-oss", "product.json"), "utf8"),
+  );
+
+  return path.join(directory, `${product.nameShort}.app`);
+}
 
 const POLL_INTERVAL_MS = 500;
 
 /** The executable inside a packaged app, named by the app's own product.json. */
-export async function packagedBinary(app) {
-  const linux = process.platform === "linux";
+export async function packagedBinary(app, platform = process.platform) {
+  const darwin = platform === "darwin";
 
   const product = JSON.parse(
     await readFile(
-      path.join(app, linux ? "resources" : "Contents/Resources", "app", "product.json"),
+      path.join(
+        app,
+        darwin ? "Contents/Resources" : "resources",
+        "app",
+        "product.json",
+      ),
       "utf8",
     ),
   );
 
-  return linux
-    ? path.join(app, product.applicationName)
-    : path.join(app, "Contents", "MacOS", product.nameShort);
+  if (darwin) return path.join(app, "Contents", "MacOS", product.nameShort);
+
+  return path.join(
+    app,
+    platform === "win32" ? `${product.nameShort}.exe` : product.applicationName,
+  );
 }
 
 /** How the telemetry smokes start Review: the packaged `app` when given, else this checkout's dev build. */
-export async function reviewLaunch({ app, stateRoot, debugPort }) {
+export async function reviewLaunch({
+  app,
+  stateRoot,
+  debugPort,
+  platform = process.platform,
+}) {
   if (!app)
-    return { command: "bash", args: [path.join(APP_DIR, "scripts", "run.sh")] };
+    return {
+      command: process.execPath,
+      args: [path.join(APP_DIR, "scripts", "desktop.mjs"), "run"],
+    };
 
   return {
-    command: await packagedBinary(app),
+    command: await packagedBinary(app, platform),
     args: [
       "--disable-telemetry",
       "--skip-welcome",
@@ -98,19 +120,83 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * scopes the match to our instance and cannot collide with a Review the
  * developer happens to be running.
  */
-function hasRenderer(userDataDir) {
+export function hasRenderer(
+  userDataDir,
+  { pid, platform = process.platform, exec = execFileSync } = {},
+) {
   try {
+    if (platform === "win32") {
+      if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+
+      // Restrict CIM to children of this launch. Pass the PID as data rather
+      // than interpolating a filesystem path into a PowerShell expression.
+      const output = exec(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-CimInstance Win32_Process -Filter "ParentProcessId = $env:WHITEBOARD_SMOKE_PARENT_PID" | Select-Object ParentProcessId,CommandLine | ConvertTo-Json -Compress',
+        ],
+        {
+          encoding: "utf8",
+          windowsHide: true,
+          timeout: 15000,
+          env: { ...process.env, WHITEBOARD_SMOKE_PARENT_PID: String(pid) },
+        },
+      );
+
+      const records = JSON.parse(output || "[]");
+      const profile = userDataDir.replaceAll("/", "\\").toLowerCase();
+
+      return (Array.isArray(records) ? records : [records]).some(
+        (record) =>
+          record?.ParentProcessId === pid &&
+          record.CommandLine?.includes("--type=renderer") &&
+          record.CommandLine.replaceAll("/", "\\")
+            .toLowerCase()
+            .includes(profile),
+      );
+    }
+
     // Match on the directory alone: a pattern starting with "--" would be read
     // as an option by BSD pgrep. The temp path is unique either way.
-    const matches = execFileSync("pgrep", [process.platform === "linux" ? "-fa" : "-fl", userDataDir], {
-      encoding: "utf8",
-    });
+    const matches = exec(
+      "pgrep",
+      [platform === "linux" ? "-fa" : "-fl", userDataDir],
+      {
+        encoding: "utf8",
+      },
+    );
 
     return matches.split("\n").some((line) => line.includes("--type=renderer"));
   } catch {
-    // pgrep exits non-zero when nothing matches.
+    // pgrep exits non-zero when nothing matches; CIM can be briefly unavailable.
     return false;
   }
+}
+
+/** Stop the launched app and its Chromium children before removing its profile. */
+export function terminateLaunch(
+  child,
+  { platform = process.platform, exec = execFileSync } = {},
+) {
+  if (platform === "win32" && child.pid) {
+    try {
+      exec("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+
+      return;
+    } catch {
+      // It may already have exited. Fall back to killing the main process
+      // when taskkill could not run; cleanup still waits for its close event.
+    }
+  }
+
+  if (child.exitCode === null && child.signalCode === null)
+    child.kill("SIGKILL");
 }
 
 /** Read every main log from this fresh profile, oldest first. */
@@ -145,7 +231,7 @@ async function readMainLog(userDataDir) {
 // above that: a hosted runner is slower, and the cost is only paid by a build
 // that is already failing.
 export async function smokeLaunch({
-  app = DEFAULT_APP,
+  app = defaultApp(),
   timeoutMs = 90_000,
 } = {}) {
   const binary = await packagedBinary(app);
@@ -155,13 +241,26 @@ export async function smokeLaunch({
   // A launch that finds a running instance hands its arguments over and exits 0
   // without opening anything. The throwaway user-data-dir is what keeps this a
   // real boot rather than a silent no-op.
-  const env = { ...process.env, ELECTRON_ENABLE_LOGGING: "1", DEV_REVIEW_HOME: path.join(userDataDir, "review-home"), DEV_REVIEW_IMPORT_FROM: "none" };
+  const env = {
+    ...process.env,
+    ELECTRON_ENABLE_LOGGING: "1",
+    DEV_REVIEW_HOME: path.join(userDataDir, "review-home"),
+    DEV_REVIEW_IMPORT_FROM: "none",
+  };
+
   delete env.ELECTRON_RUN_AS_NODE;
 
-  const child = spawn(binary, [`--user-data-dir=${userDataDir}`, `--extensions-dir=${path.join(userDataDir, "extensions")}`], {
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    binary,
+    [
+      `--user-data-dir=${userDataDir}`,
+      `--extensions-dir=${path.join(userDataDir, "extensions")}`,
+    ],
+    {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 
   let output = "";
   let mainLog = "";
@@ -170,7 +269,10 @@ export async function smokeLaunch({
   child.stdout.on("data", (chunk) => (output += chunk));
   child.stderr.on("data", (chunk) => (output += chunk));
   child.on("exit", (code, signal) => (exited = { code, signal }));
-  child.on("error", (error) => { output += error.message; exited = { code: null, signal: null }; });
+  child.on("error", (error) => {
+    output += error.message;
+    exited = { code: null, signal: null };
+  });
 
   const fail = (message) => {
     throw new Error(
@@ -204,7 +306,10 @@ export async function smokeLaunch({
         );
       }
 
-      if (hasRenderer(userDataDir) && SERVER_READY_PATTERN.test(mainLog)) {
+      if (
+        hasRenderer(userDataDir, { pid: child.pid }) &&
+        SERVER_READY_PATTERN.test(mainLog)
+      ) {
         console.log(
           `Packaged app opened a renderer and started the Review server in ${((timeoutMs - (deadline - Date.now())) / 1000).toFixed(1)}s: ${app}`,
         );
@@ -218,7 +323,7 @@ export async function smokeLaunch({
     mainLog = await readMainLog(userDataDir);
 
     const missing = [
-      !hasRenderer(userDataDir) && "a renderer",
+      !hasRenderer(userDataDir, { pid: child.pid }) && "a renderer",
       !SERVER_READY_PATTERN.test(mainLog) && "the Review server ready event",
     ].filter(Boolean);
 
@@ -226,9 +331,7 @@ export async function smokeLaunch({
       `packaged app did not produce ${missing.join(" and ")} within ${timeoutMs}ms.`,
     );
   } finally {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
+    terminateLaunch(child);
 
     await closed;
     await rm(userDataDir, {
@@ -246,12 +349,15 @@ async function main() {
   });
 
   await smokeLaunch({
-    app: values.app ? path.resolve(values.app) : DEFAULT_APP,
+    app: values.app ? path.resolve(values.app) : defaultApp(),
     timeoutMs: values["timeout-ms"] ? Number(values["timeout-ms"]) : undefined,
   });
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   main().catch((error) => {
     console.error(error.message);
     process.exit(1);

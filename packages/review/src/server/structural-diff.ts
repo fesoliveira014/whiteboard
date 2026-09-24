@@ -25,16 +25,18 @@ export interface StructuralDiffRequest {
 
 export function diffrExecutable(
   packageRoot = findReviewPackageRoot(import.meta.url),
+  platform: NodeJS.Platform = process.platform,
 ): string {
   if (process.env.REVIEW_DIFFR_BINARY) return process.env.REVIEW_DIFFR_BINARY;
-  const bundled = path.join(packageRoot, "bin", "diffr");
+  const binary = platform === "win32" ? "diffr.exe" : "diffr";
+  const bundled = path.join(packageRoot, "bin", binary);
 
-  return existsSync(bundled) ? bundled : "diffr";
+  return existsSync(bundled) ? bundled : binary;
 }
 
 export function diffrMissingError(): Error {
   return new Error(
-    `Cannot find diffr at ${diffrExecutable()}. Review Desktop bundles it at bin/diffr under its runtime; in a checkout, run \`pnpm --filter @dev.fast/review ensure:diffr\` or install diffr on PATH, or set REVIEW_DIFFR_BINARY to its executable.`,
+    `Cannot find diffr at ${diffrExecutable()}. Review Desktop bundles it under its runtime's bin directory; in a checkout, run \`pnpm --filter @dev.fast/review ensure:diffr\` or install diffr on PATH, or set REVIEW_DIFFR_BINARY to its executable.`,
   );
 }
 

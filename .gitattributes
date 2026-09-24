@@ -1,0 +1,2 @@
+# Tutorial sources produce deterministic commits and use exact text rewrites.
+packages/review/tutorial/** text eol=lf

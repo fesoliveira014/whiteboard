@@ -24,6 +24,7 @@
  * `executables` are paths (relative to the unpacked extension root) that must
  * exist and stay executable. They are asserted at materialize time so a payload
  * layout change fails the build instead of silently shipping a broken server.
+ * A target may override `executables` when its binary names differ.
  */
 export const curatedExtensions = Object.freeze([
   {
@@ -81,6 +82,13 @@ export const curatedExtensions = Object.freeze([
         sha256:
           "317cb128e8caf2495b955ef6612d828fef809187ac445242116ad8e2e32382ff",
         size: 16313907,
+      },
+      "win32-x64": {
+        url: "https://open-vsx.org/api/rust-lang/rust-analyzer/win32-x64/0.4.2990/file/rust-lang.rust-analyzer-0.4.2990@win32-x64.vsix",
+        sha256:
+          "09e9023bf4e7c1d7b333b2a2457742c482b897b776d12528e38853230e5bcb38",
+        size: 19125573,
+        executables: ["server/rust-analyzer.exe"],
       },
     },
     executables: ["server/rust-analyzer"],
@@ -156,6 +164,12 @@ export const curatedExtensions = Object.freeze([
           "78bc006683cc998e9fd1a6f2760d8cb3da63096464a217bbd192ecfb490a5516",
         size: 78144854,
       },
+      "win32-x64": {
+        url: "https://open-vsx.org/api/muhammad-sammy/csharp/win32-x64/2.145.21-g154a82fd27/file/muhammad-sammy.csharp-2.145.21-g154a82fd27@win32-x64.vsix",
+        sha256:
+          "29c22be7c5d15e8b395a403a18953e6f069bb8d9f5e886ee81eba7ee4e1a0e6b",
+        size: 78285827,
+      },
     },
     executables: [],
     stripExtensionPack: false,
@@ -218,6 +232,11 @@ export const curatedExtensions = Object.freeze([
         sha256:
           "d64fc3104f07c4d47c3122a0fa9f2da3e593937c8b506b5f952b4283d877d212",
       },
+      "win32-x64": {
+        sha256:
+          "b88ffd1b25c87fe209745ecf68a1871ad31e1eb970441b1d016cba64429b112d",
+        executables: ["bundled/libs/bin/ty.exe"],
+      },
     },
     executables: ["bundled/libs/bin/ty"],
     stripExtensionPack: false,
@@ -238,6 +257,11 @@ export const curatedExtensions = Object.freeze([
       "linux-x64": {
         sha256:
           "3ed6bc6d6dc9a70cff97698d498844b756110b5c66964689dad5839845f06556",
+      },
+      "win32-x64": {
+        sha256:
+          "23474f4e92ead0e18e8034275d2dff743f2aaaff6c4e87254b156bbedac7fb46",
+        executables: ["bundled/libs/bin/ruff.exe"],
       },
     },
     executables: ["bundled/libs/bin/ruff"],
@@ -272,7 +296,11 @@ export const curatedExtensions = Object.freeze([
 ]);
 
 /** Build targets Review knows how to materialize platform-specific VSIXes for. */
-export const supportedTargets = Object.freeze(["darwin-arm64", "linux-x64"]);
+export const supportedTargets = Object.freeze([
+  "darwin-arm64",
+  "linux-x64",
+  "win32-x64",
+]);
 
 /** Group tokens accepted by DEV_REVIEW_EXTENSIONS, in display order. */
 export const curatedGroups = Object.freeze([

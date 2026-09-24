@@ -12,10 +12,11 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+
+import { packageManagerCommand } from "./package-manager.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,7 +45,7 @@ export const REQUIRED_RUNTIME_ENTRIES = [
   "THIRD_PARTY_NOTICES.md",
   RUNTIME_SERVER_ENTRY,
   RUNTIME_CLI_ENTRY,
-  "bin/diffr",
+  process.platform === "win32" ? "bin/diffr.exe" : "bin/diffr",
   "dist/cli.js",
   "instructions/authoring.md",
   "tutorial/runtime-manifest.json",
@@ -110,8 +111,7 @@ export async function stageReviewRuntime(packagedRoot) {
 
   await rm(runtimeRoot, { recursive: true, force: true });
   await execFileAsync(
-    "pnpm",
-    [
+    ...packageManagerCommand("pnpm", [
       "--config.allow-unused-patches=true",
       // This workspace pins `nodeLinker: hoisted`, under which a plain deploy
       // links workspace dependencies back to the checkout and never resolves
@@ -125,7 +125,7 @@ export async function stageReviewRuntime(packagedRoot) {
       // Keeps the root prepare/Husky lifecycle out of packaging.
       "--ignore-scripts",
       runtimeRoot,
-    ],
+    ]),
     { cwd: monorepoRoot, maxBuffer: 64 * 1024 * 1024 },
   );
 
@@ -157,7 +157,13 @@ export async function stageReviewDocs(
 
 export async function stageDiffrBinary(
   runtimeRoot,
-  source = path.join(monorepoRoot, "packages", "review", "bin", "diffr"),
+  source = path.join(
+    monorepoRoot,
+    "packages",
+    "review",
+    "bin",
+    process.platform === "win32" ? "diffr.exe" : "diffr",
+  ),
 ) {
   if (!(await stat(source).catch(() => null))?.isFile()) {
     throw new Error(
@@ -165,22 +171,19 @@ export async function stageDiffrBinary(
     );
   }
 
-  const require = createRequire(
-    path.join(monorepoRoot, "packages/review/package.json"),
-  );
-
-  const packageRoot = path.dirname(
-    require.resolve("@dev.fast/diffr/package.json"),
-  );
-
   await execFileAsync(process.execPath, [
-    path.join(packageRoot, "bin/fetch.mjs"),
+    path.join(monorepoRoot, "packages/review/scripts/ensure-diffr.mjs"),
     "--check",
     "--into",
     path.dirname(source),
   ]);
 
-  const destination = path.join(runtimeRoot, "bin", "diffr");
+  const destination = path.join(
+    runtimeRoot,
+    "bin",
+    process.platform === "win32" ? "diffr.exe" : "diffr",
+  );
+
   await mkdir(path.dirname(destination), { recursive: true });
   await copyFile(source, destination);
   await chmod(destination, 0o755);

@@ -138,9 +138,12 @@ function discoverSource(options: ReviewUserConfigImportOptions): SourceCandidate
 		};
 	}
 
-	const configRoot = options.platform === 'darwin' || (options.platform === undefined && process.platform === 'darwin')
+	const platform = options.platform ?? process.platform;
+	const configRoot = platform === 'darwin'
 		? path.join(homeDir, 'Library', 'Application Support')
-		: path.resolve(env['XDG_CONFIG_HOME'] ?? path.join(homeDir, '.config'));
+		: platform === 'win32'
+			? path.resolve(env['APPDATA'] || path.join(homeDir, 'AppData', 'Roaming'))
+			: path.resolve(env['XDG_CONFIG_HOME'] ?? path.join(homeDir, '.config'));
 
 	const candidates = SOURCE_INSTALLS
 		.map(install => {

@@ -942,10 +942,10 @@ export const ReviewCliInstallStatusSchema = z.strictObject({
     .strictObject({ path: requiredString, version: requiredString })
     .nullable(),
   connect: z.strictObject({
-    // "sh", or "review" when Desktop has no built CLI.
+    // Native runtime on Windows; shell or standalone command elsewhere.
     command: requiredString,
-    // ["-c", "exec \"$HOME/.local/bin/review\" mcp"], or ["mcp"].
     args: z.array(z.string()),
+    env: z.record(z.string(), z.string()).optional(),
     prompts: z.record(ReviewCliInstallTargetSchema, requiredString),
     // The published plugin per harness: an install command, or Cursor's link.
     plugins: z.record(

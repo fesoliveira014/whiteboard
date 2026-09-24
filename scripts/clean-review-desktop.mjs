@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +8,7 @@ const monorepoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function cleanTargets({
   root = monorepoRoot,
-  reviewHome = process.env.DEV_REVIEW_HOME ?? resolve(process.env.HOME, ".dev"),
+  reviewHome = process.env.DEV_REVIEW_HOME ?? resolve(homedir(), ".dev"),
 } = {}) {
   const checkout = resolve(root, "apps/review-desktop/code-oss");
 

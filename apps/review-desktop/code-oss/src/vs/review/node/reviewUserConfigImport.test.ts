@@ -217,6 +217,35 @@ describe('ReviewUserConfigImport', () => {
 		);
 	});
 
+	for (const redirected of [false, true]) {
+		test(`discovers Windows settings ${redirected ? 'under redirected APPDATA' : 'in AppData/Roaming without APPDATA'}`, () => {
+			const fixture = createFixture();
+			const appData = redirected
+				? path.join(fixture.root, 'redirected roaming')
+				: path.join(fixture.root, 'AppData', 'Roaming');
+			const userDir = path.join(appData, 'Code', 'User');
+			mkdirSync(userDir, { recursive: true });
+			writeFileSync(path.join(userDir, 'settings.json'), '{ "editor.fontSize": 18 }');
+			const linuxUser = path.join(fixture.root, '.config', 'Code', 'User');
+			mkdirSync(linuxUser, { recursive: true });
+			writeFileSync(path.join(linuxUser, 'settings.json'), '{ "editor.fontSize": 12 }');
+
+			const result = importReviewUserConfig({
+				userDataPath: fixture.target,
+				platform: 'win32',
+				env: redirected ? { APPDATA: appData, XDG_CONFIG_HOME: path.join(fixture.root, '.config') } : {},
+				homeDir: fixture.root,
+			});
+
+			assert.strictEqual(result.status, 'imported');
+			assert.strictEqual(result.source, userDir);
+			assert.deepStrictEqual(
+				JSON.parse(readFileSync(path.join(fixture.target, 'User', 'settings.json'), 'utf8')),
+				{ 'editor.fontSize': 18 },
+			);
+		});
+	}
+
 	test('no Review hardening default survives an import', () => {
 		// An imported setting beats a default, so any key Review pins here that
 		// arrives from the user's old profile silently un-hardens the app.

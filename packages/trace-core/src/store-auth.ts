@@ -4,6 +4,7 @@
 // bearer token under $DEV_REVIEW_HOME/auth.json. Every store-bound command
 // reads that file back through requireStoreClient.
 
+import { type SpawnOptions, spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import type { Writable } from "node:stream";
@@ -113,16 +114,37 @@ async function defaultSleep(ms: number): Promise<void> {
 export function browserOpenCommand(
   platform: NodeJS.Platform = process.platform,
 ): string {
-  return platform === "darwin" ? "open" : "xdg-open";
+  return platform === "win32"
+    ? "rundll32.exe"
+    : platform === "darwin"
+      ? "open"
+      : "xdg-open";
 }
 
 /** Opens a URL in the browser. Callers inject a stub in tests. */
-export async function openUrlInBrowser(url: string): Promise<void> {
-  const { spawn } = await import("node:child_process");
+export async function openUrlInBrowser(
+  url: string,
+  input: {
+    platform?: NodeJS.Platform;
+    spawn?: (
+      command: string,
+      args: string[],
+      options: SpawnOptions,
+    ) => {
+      on(event: "error", listener: (error: Error) => void): void;
+      unref(): void;
+    };
+  } = {},
+): Promise<void> {
+  const platform = input.platform ?? process.platform;
 
-  const child = spawn(browserOpenCommand(), [url], {
+  const args =
+    platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
+
+  const child = (input.spawn ?? spawn)(browserOpenCommand(platform), args, {
     stdio: "ignore",
     detached: true,
+    windowsHide: true,
   });
 
   // A machine without an opener keeps the printed URL; the login goes on.

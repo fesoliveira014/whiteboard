@@ -20,8 +20,8 @@ import { INativeHostService } from '../../../platform/native/common/native.js';
 import { INotificationService } from '../../../platform/notification/common/notification.js';
 import { WindowControlsStyle, getWindowControlsStyle } from '../../../platform/window/common/window.js';
 
-/** Linux has no macOS application menu. Keep its commands next to navigation. */
-export class ReviewLinuxTitlebar extends Disposable {
+/** Windows and Linux keep the application menu next to navigation. */
+export class ReviewDesktopTitlebar extends Disposable {
 	constructor(
 		left: HTMLElement,
 		controls: HTMLElement | undefined,

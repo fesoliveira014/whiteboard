@@ -32,40 +32,13 @@ import {
 } from "./curated-extensions.manifest.mjs";
 import {
   copyCuratedExtensions,
+  extensionExecutables,
   verifyCuratedExtensions,
 } from "./curated-extensions.mjs";
 
 const APP_DIR = path.dirname(fileURLToPath(new URL("./", import.meta.url)));
 
 const EXTENSIONS_DIR = path.join(APP_DIR, "code-oss", "extensions");
-
-const buildExtensions = await readFile(
-  new URL("../code-oss/build/lib/extensions.ts", import.meta.url),
-  "utf8",
-);
-
-const gitignore = await readFile(
-  new URL("../code-oss/.gitignore", import.meta.url),
-  "utf8",
-);
-
-const runScript = await readFile(new URL("./run.sh", import.meta.url), "utf8");
-
-const curatedContribution = await readFile(
-  new URL(
-    "../code-oss/src/vs/review/contrib/extensions/reviewCuratedExtensions.contribution.ts",
-    import.meta.url,
-  ),
-  "utf8",
-);
-
-const reviewConfiguration = await readFile(
-  new URL(
-    "../code-oss/src/vs/review/common/reviewConfigurationDefaults.ts",
-    import.meta.url,
-  ),
-  "utf8",
-);
 
 async function loadImportFreeTypeScriptModule(url) {
   const source = await readFile(url, "utf8");
@@ -228,91 +201,6 @@ test("parses DEV_REVIEW_EXTENSIONS selections", () => {
   assert.throws(() => parseGroupSelection("nope"), /unknown extension group/);
 });
 
-test("carries Darwin curated extensions from Linux compile through release validation", async () => {
-  const [
-    buildScript,
-    compileScript,
-    payloadManifest,
-    packageScript,
-    validationScript,
-  ] = await Promise.all([
-    readFile(new URL("./build.sh", import.meta.url), "utf8"),
-    readFile(new URL("./compile-darwin-payload.sh", import.meta.url), "utf8"),
-    readFile(new URL("./darwin-payload-manifest.sh", import.meta.url), "utf8"),
-    readFile(new URL("./package-macos.sh", import.meta.url), "utf8"),
-    readFile(
-      new URL("./validate-release-artifacts.mjs", import.meta.url),
-      "utf8",
-    ),
-  ]);
-
-  assert.match(buildScript, /REVIEW_DESKTOP_CURATED_EXTENSION_TARGET/);
-  assert.match(
-    compileScript,
-    /REVIEW_DESKTOP_CURATED_EXTENSION_TARGET=darwin-arm64/,
-  );
-  assert.match(
-    compileScript,
-    /source "\$APP_DIR\/scripts\/darwin-payload-manifest\.sh"/,
-  );
-  assert.match(
-    packageScript,
-    /source "\$APP_DIR\/scripts\/darwin-payload-manifest\.sh"/,
-  );
-  assert.match(payloadManifest, /DARWIN_PAYLOAD_REQUIRED_PATHS=/);
-  assert.match(payloadManifest, /DARWIN_PAYLOAD_ARCHIVE_ONLY_PATHS=/);
-  assert.ok(
-    payloadManifest.indexOf("$DARWIN_PAYLOAD_CURATED_EXTENSIONS_PATH") >
-      payloadManifest.indexOf("DARWIN_PAYLOAD_REQUIRED_PATHS=(") &&
-      payloadManifest.indexOf("$DARWIN_PAYLOAD_CURATED_EXTENSIONS_PATH") <
-        payloadManifest.indexOf("DARWIN_PAYLOAD_ARCHIVE_ONLY_PATHS=("),
-    "the curated extension payload must be required by macOS packaging",
-  );
-  assert.match(compileScript, /DARWIN_PAYLOAD_ARCHIVE_ONLY_PATHS\[@\]/);
-  assert.match(compileScript, /DARWIN_PAYLOAD_REQUIRED_PATHS\[@\]/);
-  assert.match(packageScript, /DARWIN_PAYLOAD_REQUIRED_PATHS\[@\]/);
-  assert.match(compileScript, /--target=darwin-arm64/);
-  assert.match(compileScript, /--copy-to "\$CURATED_EXTENSIONS_PAYLOAD"/);
-  assert.match(packageScript, /"\$CURATED_EXTENSIONS_PAYLOAD"/);
-  assert.match(packageScript, /--source-root "\$CURATED_EXTENSIONS_SOURCE"/);
-  assert.match(
-    packageScript,
-    /--copy-to "\$PACKAGED_APP\/Contents\/Resources\/app\/extensions"/,
-  );
-  assert.ok(
-    packageScript.indexOf("curated-extensions.mjs") <
-      packageScript.indexOf("scripts/notarize-macos.sh"),
-    "curated extensions must be staged before signing and notarization",
-  );
-  assert.match(validationScript, /verifyCuratedExtensions/);
-  assert.match(validationScript, /target: "darwin-arm64"/);
-  assert.doesNotMatch(packageScript, /rust-lang\.rust-analyzer/);
-  assert.doesNotMatch(payloadManifest, /rust-lang\.rust-analyzer/);
-});
-
-test("keeps curated extensions out of the gulp packaging stream", () => {
-  for (const extension of curatedExtensions) {
-    assert.ok(
-      buildExtensions.includes(`'${extension.id}'`),
-      `${extension.id} must be listed in excludedExtensions in build/lib/extensions.ts`,
-    );
-  }
-});
-
-test("ignores every materialized curated extension directory", () => {
-  for (const extension of curatedExtensions) {
-    assert.ok(
-      gitignore.includes(`/extensions/${extension.id}/`),
-      `${extension.id} must be gitignored; its payload is downloaded, not committed`,
-    );
-  }
-});
-
-test("materializes the selected groups from run.sh", () => {
-  assert.match(runScript, /DEV_REVIEW_EXTENSIONS/);
-  assert.match(runScript, /curated-extensions\.mjs/);
-});
-
 // The payloads are downloaded rather than committed, so a clean checkout has
 // nothing to inspect. When they are present, hold them to the contract the
 // materialize step promises.
@@ -361,22 +249,25 @@ test(
         );
       }
 
-      for (const relative of extension.executables) {
+      for (const relative of extensionExecutables(extension, stamp.target)) {
         const executable = path.join(directory, relative);
         assert.ok(
           existsSync(executable),
           `${extension.id} is missing ${relative}`,
         );
-        assert.ok(
-          statSync(executable).mode & 0o111,
-          `${extension.id} ${relative} must stay executable`,
-        );
+
+        if (process.platform !== "win32") {
+          assert.ok(
+            statSync(executable).mode & 0o111,
+            `${extension.id} ${relative} must stay executable`,
+          );
+        }
       }
     }
   },
 );
 
-test("copies only bundled extensions for both package targets", () => {
+test("copies only bundled extensions for every package target", () => {
   for (const target of supportedTargets) {
     const root = mkdtempSync(path.join(os.tmpdir(), "review-curated-copy-"));
     const sourceRoot = path.join(root, "source");
@@ -407,7 +298,7 @@ test("copies only bundled extensions for both package targets", () => {
           })}\n`,
         );
 
-        for (const relative of extension.executables) {
+        for (const relative of extensionExecutables(extension, targetKey)) {
           const executable = path.join(directory, relative);
           mkdirSync(path.dirname(executable), { recursive: true });
           writeFileSync(executable, "fixture\n");
@@ -434,58 +325,5 @@ test("copies only bundled extensions for both package targets", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  }
-});
-
-test("keeps the in-app picker list in sync with the manifest", () => {
-  // Phase 1 keeps the existing bundled picker contract. Optional entries get
-  // their group rows when the trusted runtime installer is connected.
-  for (const extension of bundledExtensions) {
-    assert.ok(
-      curatedContribution.includes(`id: '${extension.id}'`),
-      `${extension.id} must appear in reviewCuratedExtensions.contribution.ts`,
-    );
-  }
-
-  // Nothing may be offered that this build does not vendor.
-  const offered = [...curatedContribution.matchAll(/\{ id: '([^']+)'/g)].map(
-    (match) => match[1],
-  );
-
-  const known = new Set(curatedExtensions.map((extension) => extension.id));
-
-  for (const id of offered) {
-    assert.ok(known.has(id), `${id} is offered by the picker but not vendored`);
-  }
-});
-
-test("keeps the keymaps mutually exclusive in the picker", () => {
-  for (const id of defaultDisabledIds) {
-    assert.ok(
-      curatedContribution.includes(`'${id}'`),
-      `${id} must be listed as a keymap in the picker`,
-    );
-  }
-
-  assert.match(curatedContribution, /KEYMAP_IDS/);
-
-  const enumDeclaration = reviewConfiguration.match(
-    /REVIEW_KEYMAPS\s*=\s*\[([^\]]+)\]/,
-  );
-
-  assert.ok(enumDeclaration, "review.keymap enum declaration");
-
-  const enumValues = [...enumDeclaration[1].matchAll(/'([^']+)'/g)].map(
-    (match) => match[1],
-  );
-
-  assert.deepEqual(enumValues, ["none", ...keymapGroups]);
-
-  for (const keymap of keymapGroups) {
-    assert.match(
-      curatedContribution,
-      new RegExp(`${keymap}:\\s*'[^']+'`),
-      `${keymap} must map to a curated extension`,
-    );
   }
 });

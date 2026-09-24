@@ -43,7 +43,7 @@
   },
   "scripts": {
     "prebuild": "pnpm run build:workspace-deps",
-    "ensure:diffr": "diffr-fetch --into bin",
+    "ensure:diffr": "node scripts/ensure-diffr.mjs --into bin",
     "build": "tsdown",
     "build:tutorial-assets": "tsx scripts/build-tutorial-assets.ts",
     "ensure:tutorial-assets": "tsx scripts/ensure-tutorial-assets.ts",
