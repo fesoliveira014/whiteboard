@@ -212,13 +212,16 @@ one of these entries:
 
 - `README.md`: fork orientation and npm-only build rule.
 - `package.json` and `package-lock.json`: omit tasks and runtime dependencies
-  for the excluded Copilot extension. Also removes dependencies whose features Review never
-  reaches: the Windows-only natives (`@vscode/windows-mutex`,
+  for the excluded Copilot extension. Also removes dependencies for disabled
+  features: `kerberos`, `@vscode/policy-watcher`, `@vscode/fs-copyfile`,
+  `@microsoft/mxc-sdk`, `@vscode/l10n-dev`, `@vscode/test-web`, and
+  `@vscode/telemetry-extractor`. Remaining native import sites typecheck against
+  `src/typings/removed-native-modules.d.ts`.
+  Windows support restores `@vscode/windows-mutex`,
   `@vscode/windows-process-tree`, `@vscode/windows-registry`,
-  `windows-foreground-love`), `kerberos`, `@vscode/policy-watcher`,
-  `@vscode/fs-copyfile`, `native-is-elevated`, `@microsoft/mxc-sdk`,
-  `@vscode/l10n-dev`, `@vscode/test-web`, and `@vscode/telemetry-extractor`.
-  Their import sites typecheck against `src/typings/removed-native-modules.d.ts`.
+  `native-is-elevated`, optional `windows-foreground-love`, and its types from
+  the source pin above. Their native install scripts and the already restored
+  `@vscode/deviceid` script are allowed; their ambient declarations are removed.
   The lockfile also advances Undici, Hono, its Node adapter, `ip-address`, and
   `body-parser` within their declared ranges to releases that clear their
   applicable security advisories.

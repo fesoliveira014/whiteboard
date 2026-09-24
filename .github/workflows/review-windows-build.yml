@@ -58,6 +58,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustup default stable-x86_64-pc-windows-msvc
 
+      - name: Restore verified diffr binary
+        id: diffr-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            packages/review/bin/diffr.exe
+            packages/review/bin/diffr.stamp.json
+          key: windows-diffr-x64-${{ hashFiles('packages/review/scripts/ensure-diffr.mjs', 'packages/review/package.json') }}
+
       - name: Build desktop and package Windows ZIP
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -73,6 +82,15 @@ jobs:
           pnpm desktop:build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm desktop:package:windows
+
+      - name: Cache verified diffr binary
+        if: steps.diffr-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            packages/review/bin/diffr.exe
+            packages/review/bin/diffr.stamp.json
+          key: ${{ steps.diffr-cache.outputs.cache-primary-key }}
 
       - name: Smoke test extracted ZIP
         run: |

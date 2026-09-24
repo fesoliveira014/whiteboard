@@ -4,63 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 // Review Desktop removes these native npm dependencies from package.json:
-// their features (Windows-only paths, enterprise policy, kerberos proxy auth,
-// telemetry device ids, the agent-host sandbox) are never reached at runtime.
+// their features (enterprise policy, native file copying, kerberos proxy auth,
+// and the agent-host sandbox) are disabled or use fallback implementations.
 // The declarations below reproduce each removed package's public typings so
 // the lazy `await import(...)` call sites still typecheck. If a feature is
 // ever revived, reinstall the package and delete its block here.
-
-declare module '@vscode/windows-mutex' {
-	export class Mutex {
-		constructor(name: string);
-		isActive(): boolean;
-		release(): void;
-	}
-	export function isActive(name: string): boolean;
-}
-
-declare module '@vscode/windows-process-tree' {
-	export enum ProcessDataFlag {
-		None = 0,
-		Memory = 1,
-		CommandLine = 2
-	}
-
-	export interface IProcessInfo {
-		pid: number;
-		ppid: number;
-		name: string;
-		memory?: number;
-		commandLine?: string;
-	}
-
-	export interface IProcessCpuInfo extends IProcessInfo {
-		cpu?: number;
-	}
-
-	export interface IProcessTreeNode {
-		pid: number;
-		name: string;
-		memory?: number;
-		commandLine?: string;
-		children: IProcessTreeNode[];
-	}
-
-	export function getProcessTree(rootPid: number, callback: (tree: IProcessTreeNode | undefined) => void, flags?: ProcessDataFlag): void;
-	export function getProcessList(rootPid: number, callback: (processList: IProcessInfo[] | undefined) => void, flags?: ProcessDataFlag): void;
-	export function getProcessCpuUsage(processList: IProcessInfo[], callback: (processListWithCpu: IProcessCpuInfo[]) => void): void;
-	export function getAllProcesses(callback: (processList: IProcessInfo[]) => void, flags?: ProcessDataFlag): void;
-}
-
-declare module '@vscode/windows-registry' {
-	export type HKEY = 'HKEY_CURRENT_USER' | 'HKEY_LOCAL_MACHINE' | 'HKEY_CLASSES_ROOT' | 'HKEY_USERS' | 'HKEY_CURRENT_CONFIG';
-	export function GetStringRegKey(hive: HKEY, path: string, name: string): string | undefined;
-	export function GetDWORDRegKey(hive: HKEY, path: string, name: string): number | undefined;
-}
-
-declare module 'windows-foreground-love' {
-	export function allowSetForegroundWindow(pid?: number): boolean;
-}
 
 declare module '@vscode/policy-watcher' {
 	export interface Watcher {
@@ -99,10 +47,6 @@ declare module '@vscode/policy-watcher' {
 	): Watcher;
 }
 
-declare module '@vscode/deviceid' {
-	export function getDeviceId(): Promise<string>;
-}
-
 declare module '@vscode/fs-copyfile' {
 	import type { CopyOptions } from 'node:fs';
 	export function cp(src: string, dest: string, options?: CopyOptions): Promise<void>;
@@ -110,11 +54,6 @@ declare module '@vscode/fs-copyfile' {
 	export const copyFileSync: (src: string, dst: string, mode?: number) => void;
 	export const isCloneSupported: (path: string) => boolean;
 	export const isMacOS: boolean;
-}
-
-declare module 'native-is-elevated' {
-	function isElevated(): boolean;
-	export = isElevated;
 }
 
 declare module 'kerberos' {
