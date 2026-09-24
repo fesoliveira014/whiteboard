@@ -68,8 +68,6 @@ export async function readTutorialRuntimeManifest(
 const COMMIT_ENV = {
   GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z",
   GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z",
-  GIT_CONFIG_GLOBAL: os.devNull,
-  GIT_CONFIG_SYSTEM: os.devNull,
   TZ: "UTC",
 };
 
@@ -108,8 +106,31 @@ export async function buildTutorialAssets(
   const temporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), "review-tutorial-build-"),
   );
+  const gitConfig = path.join(temporaryRoot, "empty.gitconfig");
+
+  async function git(cwd: string, args: string[]): Promise<string> {
+    const { stdout } = await execFilePromise(
+      "git",
+      ["-c", "core.autocrlf=false", ...args],
+      {
+        cwd,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...COMMIT_ENV,
+          GIT_CONFIG_GLOBAL: gitConfig,
+          GIT_CONFIG_SYSTEM: gitConfig,
+        },
+      },
+    );
+
+    return stdout;
+  }
 
   try {
+    // Git for Windows rejects Node's \\.\nul path as a config file.
+    await writeFile(gitConfig, "");
+
     // 1. Deterministic stub repository.
     const repo = path.join(temporaryRoot, "sample-service");
     await cp(path.join(tutorialDir, "sample-service"), repo, {
@@ -244,20 +265,6 @@ async function makeTreeOwnerWritable(directory: string): Promise<void> {
       await chmod(absolute, current.mode | 0o200);
     }
   }
-}
-
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFilePromise(
-    "git",
-    ["-c", "core.autocrlf=false", ...args],
-    {
-      cwd,
-      encoding: "utf8",
-      env: { ...process.env, ...COMMIT_ENV },
-    },
-  );
-
-  return stdout;
 }
 
 if (process.argv[1] === import.meta.filename) {

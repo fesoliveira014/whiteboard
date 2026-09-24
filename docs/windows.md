@@ -59,7 +59,7 @@ $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 whiteboard --help
 ```
 
-The installed command uses the packaged Electron runtime. If you move the extracted app, open it at the new location and reinstall the command. To select an executable explicitly for a launch from a separate CLI installation:
+The installed command uses the packaged Electron runtime. If you move the extracted app, open it at the new location, reinstall the command, and repeat the agent connection steps so their saved runtime paths are updated. To select an executable explicitly for a launch from a separate CLI installation:
 
 ```powershell
 $env:DEV_FAST_REVIEW_DESKTOP_COMMAND = 'C:\Tools\Whiteboard\Whiteboard.exe'
