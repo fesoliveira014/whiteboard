@@ -31,4 +31,5 @@ if (help.status !== 0) {
 }
 
 console.log("Launching the extracted Windows application...");
+
 await smokeLaunch({ app, timeoutMs: 90_000 });
