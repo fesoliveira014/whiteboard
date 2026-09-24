@@ -80,11 +80,8 @@ jobs:
           if (!$archive) { throw 'The Windows ZIP was not produced.' }
           $unpacked = Join-Path $env:RUNNER_TEMP 'Whiteboard smoke package'
           Expand-Archive -LiteralPath $archive.FullName -DestinationPath $unpacked
-          $env:ELECTRON_RUN_AS_NODE = '1'
-          & "$unpacked\Whiteboard.exe" "$unpacked\resources\app\review-runtime\dist\cli.js" --help
+          node apps/review-desktop/scripts/smoke-windows-package.mjs $unpacked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Remove-Item Env:ELECTRON_RUN_AS_NODE
-          node apps/review-desktop/scripts/smoke-launch-packaged.mjs --app $unpacked --timeout-ms 90000
 
       - name: Upload Windows ZIP
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
