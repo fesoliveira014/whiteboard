@@ -197,8 +197,12 @@ describe.skipIf(process.platform !== "win32")(
 
       launchEnv.PATH = path.dirname(shimPath);
 
+      const commandPrompt =
+        process.env.ComSpec ||
+        path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe");
+
       const execution = run(
-        "cmd.exe",
+        commandPrompt,
         [
           "/d",
           "/s",
@@ -224,7 +228,7 @@ describe.skipIf(process.platform !== "win32")(
         "trailing\\",
       ]);
       await expect(
-        run("cmd.exe", ["/d", "/c", "whiteboard"], {
+        run(commandPrompt, ["/d", "/c", "whiteboard"], {
           env: { ...launchEnv, ...env, FIXTURE_EXIT_CODE: "7" },
         }),
       ).rejects.toMatchObject({ code: 7 });

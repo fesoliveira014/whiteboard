@@ -106,6 +106,7 @@ export async function buildTutorialAssets(
   const temporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), "review-tutorial-build-"),
   );
+
   const gitConfig = path.join(temporaryRoot, "empty.gitconfig");
 
   async function git(cwd: string, args: string[]): Promise<string> {
