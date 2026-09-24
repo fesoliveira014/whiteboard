@@ -20,11 +20,18 @@ const roots: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+    roots.splice(0).map((root) =>
+      rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 50,
+      }),
+    ),
   );
 });
 
-async function batchRecorder(prefix: string) {
+async function batchRecorder(prefix: string, captureInput = true) {
   const home = await mkdtemp(path.join(os.tmpdir(), prefix));
   roots.push(home);
   const command = path.join(home, "whiteboard.cmd");
@@ -33,10 +40,17 @@ async function batchRecorder(prefix: string) {
     path.join(home, "capture.cjs"),
     `
     let input = "";
-    process.stdin.on("data", chunk => input += chunk);
-    process.stdin.on("end", () => require("node:fs").writeFileSync(
-      process.env.TRACE_TEST_LOG, JSON.stringify({ args: process.argv.slice(2), input })
-    ));
+    function record() {
+      require("node:fs").writeFileSync(
+        process.env.TRACE_TEST_LOG, JSON.stringify({ args: process.argv.slice(2), input })
+      );
+    }
+    if (${captureInput}) {
+      process.stdin.on("data", chunk => input += chunk);
+      process.stdin.on("end", record);
+    } else {
+      record();
+    }
   `,
   );
   await writeFile(
@@ -101,7 +115,11 @@ describe.skipIf(process.platform !== "win32")("Windows trace launchers", () => {
   }
 
   it("starts detached trace sync from a batch launcher with a spaced path", async () => {
-    const { home, command, log } = await batchRecorder("trace sync spaced ");
+    const { home, command, log } = await batchRecorder(
+      "trace sync spaced ",
+      false,
+    );
+
     const leadingArgs = ["space here", "a&b", 'say "hello"', "%PATH%"];
     spawnDetachedTraceSync({
       sessionId: "session-12345678",
