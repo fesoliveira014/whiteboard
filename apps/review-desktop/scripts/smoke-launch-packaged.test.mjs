@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -162,6 +162,26 @@ test(
       `whiteboard rénderer ${process.pid}`,
     );
 
+    function findRenderer(userDataDir) {
+      let execError;
+
+      const found = hasRenderer(userDataDir, {
+        pid: process.pid,
+        exec: (...args) => {
+          try {
+            return execFileSync(...args);
+          } catch (error) {
+            execError = error;
+            throw error;
+          }
+        },
+      });
+
+      assert.ifError(execError);
+
+      return found;
+    }
+
     const child = spawn(
       process.execPath,
       [
@@ -178,16 +198,13 @@ test(
 
     try {
       await once(child, "spawn");
-      assert.equal(hasRenderer(profile, { pid: process.pid }), true);
-      assert.equal(
-        hasRenderer(`${profile}-other`, { pid: process.pid }),
-        false,
-      );
+      assert.equal(findRenderer(profile), true);
+      assert.equal(findRenderer(`${profile}-other`), false);
     } finally {
       terminateLaunch(child);
       await closed;
     }
 
-    assert.equal(hasRenderer(profile, { pid: process.pid }), false);
+    assert.equal(findRenderer(profile), false);
   },
 );

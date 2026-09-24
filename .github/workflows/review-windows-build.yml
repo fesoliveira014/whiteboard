@@ -43,11 +43,14 @@ jobs:
 
       - name: Test Windows launch, CLI, and runtime behavior
         run: |
+          $failed = $false
           node --test scripts/ensure-diffr.test.mjs scripts/clean-review-desktop.test.mjs apps/review-desktop/scripts/windows.test.mjs apps/review-desktop/scripts/smoke-launch-packaged.test.mjs apps/review-desktop/scripts/curated-extensions.test.mjs apps/review-desktop/scripts/stage-review-runtime-docs.test.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) { $failed = $true }
           pnpm --filter '@dev.fast/review' exec vitest run --config vitest.config.ts src/windows-runtime.test.ts src/cli-install.windows.test.ts src/connect-prompts.windows.test.ts
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) { $failed = $true }
           pnpm --filter '@dev.fast/trace-core' exec vitest run --config vitest.config.ts src/store-auth-windows.test.ts src/trace-windows.test.ts
+          if ($LASTEXITCODE -ne 0) { $failed = $true }
+          if ($failed) { exit 1 }
 
       - name: Setup Rust MSVC
         run: |

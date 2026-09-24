@@ -141,7 +141,7 @@ export function hasRenderer(
         {
           encoding: "utf8",
           windowsHide: true,
-          timeout: 5000,
+          timeout: 15000,
           env: { ...process.env, WHITEBOARD_SMOKE_PARENT_PID: String(pid) },
         },
       );
