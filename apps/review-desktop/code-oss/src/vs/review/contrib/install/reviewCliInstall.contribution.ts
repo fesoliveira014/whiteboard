@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { isCancellationError } from "../../../base/common/errors.js";
-import { isLinux, isMacintosh } from "../../../base/common/platform.js";
+import { isLinux, isMacintosh, isWindows } from "../../../base/common/platform.js";
 import { localize, localize2 } from "../../../nls.js";
 import { Action2, registerAction2 } from "../../../platform/actions/common/actions.js";
 import { IDialogService } from "../../../platform/dialogs/common/dialogs.js";
@@ -95,6 +95,13 @@ class InstallReviewCliInPathAction extends Action2 {
 				await nativeHostService.uninstallShellCommand({ commandName: "review", symlinkOnly: true });
 			}
 			const installed = await desktopConnection.applyCliInstall({ shim: true });
+			if (isWindows) {
+				await accessor.get(IDialogService).info(
+					localize("review.cliInstall.windowsResult", "Whiteboard CLI setup"),
+					installed.output.trim(),
+				);
+				return;
+			}
 			notificationService.info(
 				localize(
 					"review.cliInstall.installed",
@@ -196,6 +203,16 @@ class UninstallReviewDesktopAction extends Action2 {
 				localize(
 					"review.uninstall.linuxFinish",
 					"To remove the app, quit Whiteboard and run sudo apt remove dev-fast-review on Ubuntu, or sudo pacman -R dev-fast-review on Omarchy / Arch. Your sessions and settings stay on disk.",
+				),
+			);
+			return;
+		}
+		if (isWindows) {
+			await dialogService.info(
+				localize("review.uninstall.windowsDone", "Whiteboard's user-installed integrations were removed."),
+				localize(
+					"review.uninstall.windowsFinish",
+					"To remove the portable app, quit Whiteboard and delete its extracted folder. Your sessions and settings stay on disk.",
 				),
 			);
 			return;

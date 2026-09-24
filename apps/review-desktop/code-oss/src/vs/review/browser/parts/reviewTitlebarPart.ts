@@ -15,7 +15,7 @@ import { IConfigurationService } from '../../../platform/configuration/common/co
 import { DisposableStore, toDisposable } from '../../../base/common/lifecycle.js';
 import { IThemeService } from '../../../platform/theme/common/themeService.js';
 import { EDITOR_GROUP_HEADER_TABS_BACKGROUND, TITLE_BAR_ACTIVE_BACKGROUND, TITLE_BAR_ACTIVE_FOREGROUND, TITLE_BAR_INACTIVE_BACKGROUND, TITLE_BAR_INACTIVE_FOREGROUND } from '../../../workbench/common/theme.js';
-import { isLinux, isMacintosh, isNative, isWeb, platformLocale } from '../../../base/common/platform.js';
+import { isLinux, isMacintosh, isNative, isWeb, isWindows, platformLocale } from '../../../base/common/platform.js';
 import { $, addDisposableListener, append, getWindow, getWindowId, prepend } from '../../../base/browser/dom.js';
 import { renderIcon } from '../../../base/browser/ui/iconLabel/iconLabels.js';
 import { Codicon } from '../../../base/common/codicons.js';
@@ -35,7 +35,7 @@ import { WindowTitle } from '../../../workbench/browser/parts/titlebar/windowTit
 import { CommandCenterControl } from '../../../workbench/browser/parts/titlebar/commandCenterControl.js';
 import { INativeHostService } from '../../../platform/native/common/native.js';
 import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegateFactory.js';
-import { ReviewLinuxTitlebar } from './reviewLinuxTitlebar.js';
+import { ReviewDesktopTitlebar } from './reviewDesktopTitlebar.js';
 
 /**
  * The deliberately small Review titlebar. It owns the drag region and the macOS
@@ -150,8 +150,8 @@ export class ReviewTitlebarPart extends Part implements ITitlebarPart {
 			}
 		}
 
-		if (isLinux && isNative) {
-			this._register(this.instantiationService.createInstance(ReviewLinuxTitlebar, this.leftContent, this.windowControlsContainer, getWindow(parent)));
+		if ((isLinux || isWindows) && isNative) {
+			this._register(this.instantiationService.createInstance(ReviewDesktopTitlebar, this.leftContent, this.windowControlsContainer, getWindow(parent)));
 		}
 		const navigationContainer = append(this.leftContent, $('div.review-titlebar-navigation'));
 		const windowTitle = this._register(this.instantiationService.createInstance(WindowTitle, getWindow(parent)));
@@ -238,7 +238,7 @@ export class MainReviewTitlebarPart extends ReviewTitlebarPart {
 
 	override updateStyles(): void {
 		super.updateStyles();
-		if (isLinux && this.element && this.nativeHostService) {
+		if ((isLinux || isWindows) && this.element && this.nativeHostService) {
 			void this.nativeHostService.updateWindowControls({
 				targetWindowId: getWindowId(mainWindow),
 				backgroundColor: this.getColor(EDITOR_GROUP_HEADER_TABS_BACKGROUND) ?? undefined,

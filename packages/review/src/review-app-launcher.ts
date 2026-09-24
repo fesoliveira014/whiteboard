@@ -18,10 +18,12 @@ const RELEASE_APPS = {
   stable: {
     bundleId: "dev.fast.review",
     linuxLauncher: "/usr/bin/review-desktop",
+    windowsExecutable: "Whiteboard.exe",
   },
   preview: {
     bundleId: "dev.fast.review.preview",
     linuxLauncher: "/usr/bin/review-preview-desktop",
+    windowsExecutable: "Whiteboard Preview.exe",
   },
 };
 
@@ -227,19 +229,21 @@ export function launchDesktopApplication(
 ): DesktopLaunchAttempt {
   const platform = input.platform ?? process.platform;
 
-  if (platform !== "darwin" && platform !== "linux") {
+  if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
     return {
       method: `the ${platform} application launcher`,
       successfulExitIsExpected: false,
       completion: Promise.reject(
-        new Error("automatic launch is available only on macOS and Linux"),
+        new Error(
+          "automatic launch is available only on macOS, Linux and Windows",
+        ),
       ),
     };
   }
 
   const electron = input.electron ?? Boolean(process.versions.electron);
   const env = { ...(input.env ?? process.env) };
-  const directLaunch = electron || platform === "linux";
+  const directLaunch = electron || platform !== "darwin";
   const focus = input.focus === true;
 
   if (focus) delete env[REVIEW_DESKTOP_BACKGROUND_ENV];
@@ -247,7 +251,7 @@ export function launchDesktopApplication(
 
   if (directLaunch) delete env.ELECTRON_RUN_AS_NODE;
 
-  if (platform === "linux") {
+  if (platform === "linux" || platform === "win32") {
     delete env.VSCODE_DEV;
     delete env.VSCODE_CLI;
   }
@@ -282,13 +286,24 @@ export function launchDesktopApplication(
       method = `the Desktop-managed bundle at "${command}"`;
     }
 
+    if (platform === "win32") {
+      command =
+        appPath ||
+        (input.instance ? "" : env.DEV_FAST_REVIEW_DESKTOP_COMMAND?.trim()) ||
+        (electron && !input.instance
+          ? (input.execPath ?? process.execPath)
+          : release.windowsExecutable);
+      method = `the Windows application at "${command}"`;
+    }
+
     args = [];
     const stateRoot = env.DEV_FAST_REVIEW_DESKTOP_STATE_ROOT?.trim();
 
     if (stateRoot) {
+      const paths = platform === "win32" ? path.win32 : path;
       args = [
-        `--user-data-dir=${path.resolve(stateRoot, "user-data")}`,
-        `--extensions-dir=${path.resolve(stateRoot, "extensions")}`,
+        `--user-data-dir=${paths.resolve(stateRoot, "user-data")}`,
+        `--extensions-dir=${paths.resolve(stateRoot, "extensions")}`,
       ];
     }
   }

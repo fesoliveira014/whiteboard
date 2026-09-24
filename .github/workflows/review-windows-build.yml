@@ -1,0 +1,93 @@
+name: Whiteboard Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whiteboard-windows-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Build and validate Windows x64 ZIP
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BUILD_SOURCEVERSION: ${{ github.sha }}
+      REVIEW_DESKTOP_CI_FAST: "1"
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: apps/review-desktop/code-oss/.nvmrc
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Rust MSVC
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable-x86_64-pc-windows-msvc
+
+      - name: Build desktop and package Windows ZIP
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw 'Visual Studio C++ Build Tools are required.' }
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          $sdkBin = Join-Path $env:WindowsSdkDir "bin\$($env:WindowsSDKVersion.TrimEnd('\'))\x64"
+          $env:Path = "$sdkBin;$env:Path"
+          Get-Command cl.exe, signtool.exe, python.exe, cargo.exe | Select-Object Name, Source
+          pnpm desktop:build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm desktop:package:windows
+
+      - name: Test Windows launch, CLI, and runtime behavior
+        run: |
+          node --test scripts/ensure-diffr.test.mjs scripts/clean-review-desktop.test.mjs apps/review-desktop/scripts/windows.test.mjs apps/review-desktop/scripts/smoke-launch-packaged.test.mjs apps/review-desktop/scripts/curated-extensions.test.mjs apps/review-desktop/scripts/stage-review-runtime-docs.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --filter @dev.fast/review exec vitest run --config vitest.config.ts src/windows-runtime.test.ts src/cli-install.windows.test.ts src/connect-prompts.windows.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --filter @dev.fast/trace-core exec vitest run --config vitest.config.ts src/store-auth-windows.test.ts src/trace-windows.test.ts
+
+      - name: Smoke test extracted ZIP
+        run: |
+          $archive = Get-ChildItem dist/Whiteboard-win32-x64-*.zip | Select-Object -First 1
+          if (!$archive) { throw 'The Windows ZIP was not produced.' }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'Whiteboard smoke package'
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $unpacked
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          & "$unpacked\Whiteboard.exe" "$unpacked\resources\app\review-runtime\dist\cli.js" --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:ELECTRON_RUN_AS_NODE
+          node apps/review-desktop/scripts/smoke-launch-packaged.mjs --app $unpacked --timeout-ms 90000
+
+      - name: Upload Windows ZIP
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: whiteboard-windows-x64
+          path: dist/Whiteboard-win32-x64-*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

@@ -53,6 +53,7 @@ export function resolveTraceCommand(
     explicit?: TraceCommand | string;
     env?: NodeJS.ProcessEnv;
     homeDir?: string;
+    platform?: NodeJS.Platform;
   } = {},
 ): TraceCommand {
   if (isStringValue(input.explicit)) return { file: input.explicit };
@@ -63,22 +64,32 @@ export function resolveTraceCommand(
 
   if (env.REVIEW_TRACE_COMMAND) return { file: env.REVIEW_TRACE_COMMAND };
 
+  const windows = (input.platform ?? process.platform) === "win32";
+  const name = windows ? "whiteboard.cmd" : "whiteboard";
+
   const installed = path.join(
     input.homeDir ?? traceHomeDir(env),
     ".local",
     "bin",
-    "whiteboard",
+    name,
   );
 
   if (existsSync(installed)) return { file: installed };
 
-  const onPath = (env.PATH ?? "")
-    .split(path.delimiter)
+  const names = windows
+    ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+        .split(";")
+        .filter(Boolean)
+        .map((extension) => `whiteboard${extension.toLowerCase()}`)
+    : [name];
+
+  const onPath = (env.PATH ?? env.Path ?? "")
+    .split(windows ? ";" : path.delimiter)
     .filter((directory) => path.isAbsolute(directory))
-    .map((directory) => path.join(directory, "whiteboard"))
+    .flatMap((directory) => names.map((name) => path.join(directory, name)))
     .find(isLiveTraceExecutable);
 
-  return { file: onPath ?? "whiteboard" };
+  return { file: onPath ?? name };
 }
 
 /** Quotes one value for a POSIX shell command. */
@@ -96,7 +107,10 @@ export function isLiveTraceExecutable(file: string | undefined): boolean {
   if (!file || !path.isAbsolute(file)) return false;
 
   try {
-    accessSync(file, constants.X_OK);
+    accessSync(
+      file,
+      process.platform === "win32" ? constants.F_OK : constants.X_OK,
+    );
 
     return true;
   } catch {

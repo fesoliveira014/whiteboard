@@ -263,8 +263,12 @@ function sanitizeManifest(directory, extension) {
 }
 
 /** Fails loudly when a payload's layout drifts instead of shipping a broken server. */
-function ensureExecutables(directory, extension) {
-  for (const relative of extension.executables) {
+export function extensionExecutables(extension, targetKey) {
+  return extension.targets[targetKey]?.executables ?? extension.executables;
+}
+
+function ensureExecutables(directory, extension, targetKey) {
+  for (const relative of extensionExecutables(extension, targetKey)) {
     const executable = path.join(directory, relative);
 
     if (!fs.existsSync(executable)) {
@@ -284,11 +288,31 @@ function extractVsix(vsix, extension, targetKey, sha256) {
   fs.mkdirSync(staging, { recursive: true });
 
   try {
-    // System unzip preserves the unix mode bits that carry the executable
-    // flag on bundled language servers.
-    execFileSync("unzip", ["-q", vsix, "extension/*", "-d", staging], {
-      stdio: "pipe",
-    });
+    if (process.platform === "win32") {
+      execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory($env:REVIEW_VSIX, $env:REVIEW_VSIX_STAGING)",
+        ],
+        {
+          stdio: "pipe",
+          env: {
+            ...process.env,
+            REVIEW_VSIX: vsix,
+            REVIEW_VSIX_STAGING: staging,
+          },
+        },
+      );
+    } else {
+      // unzip preserves the Unix mode bits on bundled language servers.
+      execFileSync("unzip", ["-q", vsix, "extension/*", "-d", staging], {
+        stdio: "pipe",
+      });
+    }
+
     const payload = path.join(staging, "extension");
 
     if (!fs.existsSync(payload)) {
@@ -303,7 +327,7 @@ function extractVsix(vsix, extension, targetKey, sha256) {
       );
     }
 
-    ensureExecutables(payload, extension);
+    ensureExecutables(payload, extension, targetKey);
     fs.writeFileSync(
       path.join(payload, STAMP_FILE),
       `${JSON.stringify({ id: extension.id, version: extension.version, target: targetKey, sha256, engine }, undefined, 2)}\n`,
@@ -418,7 +442,7 @@ export function verifyCuratedExtensions({
       }
     }
 
-    for (const relative of extension.executables) {
+    for (const relative of extensionExecutables(extension, targetKey)) {
       const executable = path.join(directory, relative);
 
       if (!fs.existsSync(executable)) {
@@ -427,7 +451,10 @@ export function verifyCuratedExtensions({
         );
       }
 
-      if ((fs.statSync(executable).mode & 0o111) === 0) {
+      if (
+        process.platform !== "win32" &&
+        (fs.statSync(executable).mode & 0o111) === 0
+      ) {
         throw new Error(`${extension.id}: ${relative} is not executable`);
       }
     }
@@ -460,9 +487,8 @@ export function copyCuratedExtensions({
 
     const destination = path.join(destinationRoot, extension.id);
     fs.rmSync(destination, { recursive: true, force: true });
-    // cp -a keeps the executable bits on bundled language servers.
-    execFileSync("cp", ["-a", source, destination], { stdio: "pipe" });
-    ensureExecutables(destination, extension);
+    fs.cpSync(source, destination, { recursive: true, verbatimSymlinks: true });
+    ensureExecutables(destination, extension, targetKey);
     console.log(`staged ${extension.id} -> ${destination}`);
   }
 

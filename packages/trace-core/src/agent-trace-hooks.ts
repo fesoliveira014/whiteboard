@@ -77,7 +77,7 @@ function openCodePluginPath(
 }
 
 function executableOwner(file: string): TraceHookOwner | null {
-  const base = path.basename(file);
+  const base = path.win32.basename(file).replace(/\.(?:cmd|bat|exe)$/i, "");
 
   return base === "review" || base === "whiteboard" ? "review" : null;
 }
@@ -114,7 +114,10 @@ export function traceHookCommandOwner(
 function extensionCommandFile(source: string): string | undefined {
   if (!source.trimStart().startsWith(`// ${PI_EXTENSION_MARKER}`))
     return undefined;
-  const match = /spawn\(("(?:[^"\\]|\\.)*"), \["trace", "hook"/.exec(source);
+
+  const match =
+    /const traceCommand = ("(?:[^"\\]|\\.)*");/.exec(source) ??
+    /spawn\(("(?:[^"\\]|\\.)*"), \["trace", "hook"/.exec(source);
 
   if (!match) return undefined;
 
@@ -152,22 +155,7 @@ export default function (pi: ExtensionAPI) {
   });
 }
 
-function runTraceHook(eventName: string, sessionId: string, cwd: string) {
-  const payload = JSON.stringify({
-    hook_event_name: eventName,
-    session_id: sessionId,
-  });
-
-  const proc = spawn(${JSON.stringify(reviewCommand)}, ["trace", "hook", eventName], {
-    cwd,
-    stdio: ["pipe", "ignore", "ignore"],
-  });
-
-  // Missing binaries and closed pipes must never crash the harness.
-  proc.on("error", () => {});
-  proc.stdin.on("error", () => {});
-  proc.stdin.end(payload);
-}
+${traceHookProcessSource(reviewCommand)}
 `;
 }
 
@@ -240,16 +228,36 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
+${traceHookProcessSource(reviewCommand)}
+`;
+}
+
+/** Standalone process launcher shared by the two generated harness extensions. */
+function traceHookProcessSource(reviewCommand: string): string {
+  return `const traceCommand = ${JSON.stringify(reviewCommand)};
+
 function runTraceHook(eventName: string, sessionId: string, cwd: string) {
   const payload = JSON.stringify({
     hook_event_name: eventName,
     session_id: sessionId,
   });
 
-  const proc = spawn(${JSON.stringify(reviewCommand)}, ["trace", "hook", eventName], {
-    cwd,
-    stdio: ["pipe", "ignore", "ignore"],
-  });
+  const batch = process.platform === "win32" && !/\\.(?:exe|com)$/i.test(traceCommand);
+  // The environment preserves literal percent signs in installation paths.
+  // Only fixed lifecycle event names appear in the command; session data uses stdin.
+  const proc = spawn(
+    batch ? process.env.ComSpec ?? "cmd.exe" : traceCommand,
+    batch
+      ? ["/d", "/v:off", "/s", "/c", '\"\"%WHITEBOARD_TRACE_COMMAND%\" trace hook ' + eventName + '\"']
+      : ["trace", "hook", eventName],
+    {
+      cwd,
+      stdio: ["pipe", "ignore", "ignore"],
+      windowsVerbatimArguments: batch,
+      windowsHide: true,
+      env: batch ? { ...process.env, WHITEBOARD_TRACE_COMMAND: traceCommand } : process.env,
+    },
+  );
 
   // Missing binaries and closed pipes must never crash the harness.
   proc.on("error", () => {});

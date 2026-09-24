@@ -34,6 +34,7 @@ apps/ci/.wrangler-jaeger.jsonc
 apps/review-desktop/.node/
 apps/review-desktop/VSCode-darwin-arm64/
 apps/review-desktop/VSCode-linux-*/
+apps/review-desktop/VSCode-win32-*/
 apps/review-desktop/*.dmg
 
 # Logs

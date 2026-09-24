@@ -78,18 +78,28 @@ export function cliInstallUpdateMarkerPath(
   return path.join(reviewDesktopStateDir(env), "cli-install-updated");
 }
 
-export function pathShimPath(homeDir = os.homedir()): string {
-  return path.join(homeDir, ".local", "bin", "whiteboard");
+export function pathShimPath(
+  homeDir = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return path.join(
+    homeDir,
+    ".local",
+    "bin",
+    platform === "win32" ? "whiteboard.cmd" : "whiteboard",
+  );
 }
 
 export async function resolveCliInstallStatus(input: {
   packageRoot: string;
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 }): Promise<ReviewCliInstallStatus> {
   const homeDir = input.homeDir ?? os.homedir();
   const env = input.env ?? process.env;
-  const shimPath = pathShimPath(homeDir);
+  const platform = input.platform ?? process.platform;
+  const shimPath = pathShimPath(homeDir, platform);
   const cliPath = path.join(input.packageRoot, "dist", "cli.js");
 
   const [fingerprint, stamp, updated, trace, legacySkills, cliBuilt, hasShim] =
@@ -105,6 +115,11 @@ export async function resolveCliInstallStatus(input: {
 
   const granted = stamp?.consent === "granted";
 
+  const launch = reviewMcpLaunch(hasShim, platform, {
+    cliPath,
+    devHome: devReviewHome(env, homeDir),
+  });
+
   const status: ReviewCliInstallStatus = {
     fingerprint,
     stamp,
@@ -113,8 +128,13 @@ export async function resolveCliInstallStatus(input: {
     shim: {
       path: shimPath,
       installed: hasShim,
-      profileConfigured: await isShellProfileConfigured(homeDir),
-      onPath: pathContainsDirectory(env.PATH, path.dirname(shimPath)),
+      profileConfigured:
+        platform === "win32" ? false : await isShellProfileConfigured(homeDir),
+      onPath: pathContainsDirectory(
+        envPath(env, platform),
+        path.dirname(shimPath),
+        platform,
+      ),
     },
     trace,
     cli: cliBuilt
@@ -124,9 +144,9 @@ export async function resolveCliInstallStatus(input: {
         }
       : null,
     connect: {
-      ...reviewMcpLaunch(hasShim),
+      ...launch,
       prompts: connectSetupPrompts(),
-      plugins: connectPlugins(hasShim),
+      plugins: connectPlugins(hasShim, platform, launch),
     },
     legacySkills: legacySkills.map((skillPath) => ({
       path: homeRelative(homeDir, skillPath),
@@ -149,6 +169,7 @@ interface ApplyCliInstallInput {
   cliRuntimePath?: string;
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 }
 
 export async function applyCliInstall(
@@ -276,8 +297,10 @@ async function applyCliInstallUnlocked(
   }
 
   if (traceEnabled) {
-    const executable = (await isOwnedShim(pathShimPath(homeDir)))
-      ? pathShimPath(homeDir)
+    const executable = (await isOwnedShim(
+      pathShimPath(homeDir, input.platform),
+    ))
+      ? pathShimPath(homeDir, input.platform)
       : undefined;
 
     const hooks = await installHarnessHooks({ homeDir, env, executable });
@@ -322,6 +345,7 @@ async function installShim(
     cliRuntimePath: input.cliRuntimePath,
     homeDir: input.homeDir,
     env: input.env,
+    platform: input.platform,
   });
 
   chunks.push(installed.output);
@@ -341,7 +365,33 @@ function withShimPath(
 /** The published plugin per harness; Cursor's link needs the shim it launches. */
 function connectPlugins(
   hasShim: boolean,
+  platform: NodeJS.Platform,
+  launch: ReturnType<typeof reviewMcpLaunch>,
 ): ReviewCliInstallStatus["connect"]["plugins"] {
+  if (platform === "win32") {
+    return {
+      claude: {
+        label: "Connect Claude Code",
+        command: "whiteboard connect claude",
+      },
+      codex: { label: "Connect Codex", command: "whiteboard connect codex" },
+      cursor: hasShim
+        ? {
+            label: "Install in Cursor",
+            url: cursorInstallDeeplink(launch),
+          }
+        : { label: "Install in Cursor" },
+      opencode: {
+        label: "Connect OpenCode",
+        command: "whiteboard connect opencode",
+      },
+      pi: {
+        label: "Install the Pi package",
+        command: "pi install npm:@dev.fast/pi-whiteboard",
+      },
+    };
+  }
+
   return {
     claude: {
       label: "Install the Claude Code plugin",
@@ -448,6 +498,7 @@ interface RemoveCliInstallInput {
   trace?: boolean;
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 }
 
 export async function removeCliInstall(
@@ -465,20 +516,32 @@ async function removeCliInstallUnlocked(
   const env = input.env ?? process.env;
   const chunks: string[] = [];
 
-  const expectedTraceCommand = (await isOwnedShim(pathShimPath(homeDir)))
-    ? pathShimPath(homeDir)
+  const platform = input.platform ?? process.platform;
+
+  const expectedTraceCommand = (await isOwnedShim(
+    pathShimPath(homeDir, platform),
+  ))
+    ? pathShimPath(homeDir, platform)
     : "";
 
   const previous = await readCliInstallStamp(cliInstallStampPath(env));
 
   if (input.shim) {
-    const shimPath = pathShimPath(homeDir);
+    const shimPath = pathShimPath(homeDir, platform);
     // Only ever delete a command file this app wrote; a hand-made file at
     // the same path stays untouched.
     const contents = await readTextIfExists(shimPath);
 
     if (contents.includes(SHIM_MARKER)) {
       await rm(shimPath, { force: true });
+
+      if (platform === "win32") {
+        const helperPath = windowsShimHelperPath(shimPath);
+
+        if (await isOwnedShim(helperPath))
+          await rm(helperPath, { force: true });
+      }
+
       chunks.push(`[ok] removed whiteboard command ${shimPath}\n`);
     } else if (contents) {
       chunks.push(
@@ -486,7 +549,9 @@ async function removeCliInstallUnlocked(
       );
     }
 
-    for (const profilePath of await removeShellProfilePath(homeDir)) {
+    for (const profilePath of platform === "win32"
+      ? []
+      : await removeShellProfilePath(homeDir)) {
       chunks.push(`[ok] removed Review PATH entry from ${profilePath}\n`);
     }
   }
@@ -565,9 +630,14 @@ export async function isOwnedShim(shimPath: string): Promise<boolean> {
   return hasManagedShimMarker(await readTextIfExists(shimPath));
 }
 
+function windowsShimHelperPath(shimPath: string): string {
+  return path.join(path.dirname(shimPath), "whiteboard-launcher.ps1");
+}
+
 /**
- * The shim is POSIX sh, so running `review` needs no Node.js at all to start.
- * It prefers the CLI and runtime the running Whiteboard Desktop advertises in its
+ * The shim uses cmd on Windows and POSIX sh elsewhere. Both can launch the
+ * app's Electron runtime without a system Node installation. The POSIX shim
+ * prefers the CLI and runtime the running Whiteboard Desktop advertises in its
  * discovery file, falls back to the paths baked in by the app that wrote it,
  * and runs the CLI under the app's Electron binary as Node
  * (ELECTRON_RUN_AS_NODE) — the exact runtime the server uses. System Node is
@@ -578,7 +648,84 @@ export async function writePathShim(
   cliPath: string,
   runtimePath: string | undefined,
   devHome: string,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
+  if (platform === "win32") {
+    const helperPath = windowsShimHelperPath(shimPath);
+
+    if ((await isFile(helperPath)) && !(await isOwnedShim(helperPath))) {
+      throw new Error(
+        `Refusing to replace the existing launcher at ${helperPath}`,
+      );
+    }
+
+    const quote = (value: string) => "'" + value.replaceAll("'", "''") + "'";
+
+    // Windows PowerShell 5 reads UTF-8 correctly when the script has a BOM.
+    // The cmd wrapper stays ASCII, so it also works with legacy code pages.
+    const helper = String.raw`# Managed by Whiteboard Desktop. Do not edit.
+$ErrorActionPreference = 'Stop'
+try {
+  $cli = ${quote(cliPath)}
+  $runtime = ${quote(runtimePath ?? "")}
+  if (-not $env:DEV_REVIEW_HOME) { $env:DEV_REVIEW_HOME = ${quote(devHome)} }
+  if (-not [System.IO.File]::Exists($cli)) {
+    [Console]::Error.WriteLine('Whiteboard CLI not found. Start Whiteboard Desktop and reinstall its command.')
+    exit 1
+  }
+  if ([System.IO.File]::Exists($runtime)) {
+    $env:ELECTRON_RUN_AS_NODE = '1'
+  } else {
+    $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $node) {
+      [Console]::Error.WriteLine('Whiteboard needs Node.js 24 or newer. Install Node 24, or reinstall the Whiteboard Desktop command.')
+      exit 1
+    }
+    $runtime = $node.Source
+  }
+  function Quote-Argument([string]$value) {
+    $escaped = [regex]::Replace($value, '(\\*)"', '$1$1\"')
+    '"' + [regex]::Replace($escaped, '(\\+)$', '$1$1') + '"'
+  }
+  $start = New-Object System.Diagnostics.ProcessStartInfo
+  $start.FileName = $runtime
+  $start.Arguments = ((@($cli) + $args | ForEach-Object { Quote-Argument ([string]$_) }) -join ' ')
+  $start.UseShellExecute = $false
+  $child = [System.Diagnostics.Process]::Start($start)
+  $child.WaitForExit()
+  exit $child.ExitCode
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
+`;
+
+    await writeFileAtomicAsync(
+      helperPath,
+      "\uFEFF" + helper.replaceAll("\n", "\r\n"),
+      {
+        encoding: "utf8",
+        mode: 0o755,
+        replaceSymlink: true,
+      },
+    );
+
+    const source = `@echo off
+setlocal DisableDelayedExpansion
+rem Managed by Whiteboard Desktop. Do not edit.
+"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0whiteboard-launcher.ps1" %*
+exit /b %errorlevel%
+`;
+
+    await writeFileAtomicAsync(shimPath, source.replaceAll("\n", "\r\n"), {
+      encoding: "utf8",
+      mode: 0o755,
+      replaceSymlink: true,
+    });
+
+    return;
+  }
+
   const source = `#!/bin/sh
 # Managed by Whiteboard Desktop ("Review: Install CLI in PATH"). Do not edit.
 FALLBACK_CLI=${shSingleQuote(cliPath)}
@@ -682,10 +829,12 @@ export async function installReviewCommand(input: {
   cliRuntimePath?: string;
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 }): Promise<{ shimPath: string; output: string }> {
   const homeDir = input.homeDir ?? os.homedir();
   const env = input.env ?? process.env;
-  const shimPath = pathShimPath(homeDir);
+  const platform = input.platform ?? process.platform;
+  const shimPath = pathShimPath(homeDir, platform);
 
   if ((await isFile(shimPath)) && !(await isOwnedShim(shimPath))) {
     return {
@@ -698,6 +847,7 @@ export async function installReviewCommand(input: {
     "whiteboard",
     shimPath,
     env,
+    platform,
   );
 
   await writePathShim(
@@ -705,6 +855,7 @@ export async function installReviewCommand(input: {
     input.cliPath,
     input.cliRuntimePath,
     devReviewHome(env, homeDir),
+    platform,
   );
 
   if (await traceMachineEnabled({ homeDir, env })) {
@@ -723,10 +874,18 @@ export async function installReviewCommand(input: {
     }
   }
 
-  const legacyShim = path.join(path.dirname(shimPath), "review");
+  const legacyShim = path.join(
+    path.dirname(shimPath),
+    platform === "win32" ? "review.cmd" : "review",
+  );
 
   if (await isOwnedShim(legacyShim)) await rm(legacyShim, { force: true });
-  const profileOutput = await ensureShellProfilePath({ homeDir, env });
+
+  const profileOutput = await ensureShellProfilePath({
+    homeDir,
+    env,
+    platform,
+  });
 
   const shadowingOutput = shadowingCommand
     ? `Warning: ${shadowingCommand} currently shadows ${shimPath}. Remove that PATH entry or put ${path.dirname(shimPath)} before it.\n`
@@ -741,20 +900,26 @@ export async function installReviewCommand(input: {
 export async function ensureShellProfilePath(input: {
   homeDir: string;
   env: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 }): Promise<string> {
-  const shimDirectory = path.dirname(pathShimPath(input.homeDir));
+  const platform = input.platform ?? process.platform;
+  const shimDirectory = path.dirname(pathShimPath(input.homeDir, platform));
 
-  if (pathContainsDirectory(input.env.PATH, shimDirectory)) return "";
+  if (
+    pathContainsDirectory(envPath(input.env, platform), shimDirectory, platform)
+  )
+    return "";
+
+  if (platform === "win32") {
+    return `Open "Edit environment variables for your account", edit Path, and add ${shimDirectory}. Then reopen your terminal and Whiteboard Desktop.\nFor the current PowerShell session: $env:Path = '${shimDirectory.replaceAll("'", "''")};' + $env:Path\n`;
+  }
 
   const shell = path.basename(input.env.SHELL?.trim() ?? "");
   let profileName: (typeof SHELL_PROFILE_NAMES)[number] | undefined;
 
   if (shell === "bash") {
     profileName = ".bash_profile";
-  } else if (
-    shell === "zsh" ||
-    (shell !== "fish" && process.platform === "darwin")
-  ) {
+  } else if (shell === "zsh" || (shell !== "fish" && platform === "darwin")) {
     profileName = ".zprofile";
   }
 
@@ -799,26 +964,45 @@ async function resolvePathCommand(
   command: string,
   shimPath: string,
   env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
 ): Promise<string | undefined> {
-  const entries = (env.PATH ?? "").split(path.delimiter);
-  const shimDirectory = path.resolve(path.dirname(shimPath));
-
-  const shimIndex = entries.findIndex(
-    (entry) => path.resolve(entry || ".") === shimDirectory,
+  const entries = (envPath(env, platform) ?? "").split(
+    platform === "win32" ? ";" : path.delimiter,
   );
 
+  const shimDirectory = normalizePathEntry(path.dirname(shimPath), platform);
+
+  const shimIndex = entries.findIndex(
+    (entry) => normalizePathEntry(entry || ".", platform) === shimDirectory,
+  );
+
+  const extensions =
+    platform === "win32"
+      ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")
+      : [""];
+
   for (let index = 0; index < entries.length; index += 1) {
-    const candidate = path.join(entries[index] || ".", command);
+    for (const extension of extensions) {
+      const candidate = path.join(
+        (entries[index] || ".").replace(/^"|"$/g, ""),
+        command + extension,
+      );
 
-    if (!(await isExecutableFile(candidate))) continue;
+      if (
+        !(platform === "win32"
+          ? await isFile(candidate)
+          : await isExecutableFile(candidate))
+      )
+        continue;
 
-    if ((await readTextIfExists(candidate)).includes(SHIM_MARKER)) {
-      return undefined;
+      if ((await readTextIfExists(candidate)).includes(SHIM_MARKER)) {
+        return undefined;
+      }
+
+      return shimIndex === -1 || index < shimIndex
+        ? path.resolve(candidate)
+        : undefined;
     }
-
-    return shimIndex === -1 || index < shimIndex
-      ? path.resolve(candidate)
-      : undefined;
   }
 
   return undefined;
@@ -827,13 +1011,33 @@ async function resolvePathCommand(
 function pathContainsDirectory(
   pathValue: string | undefined,
   directory: string,
+  platform: NodeJS.Platform,
 ): boolean {
   return (pathValue ?? "")
-    .split(path.delimiter)
+    .split(platform === "win32" ? ";" : path.delimiter)
     .some(
       (entry) =>
-        entry.length > 0 && path.resolve(entry) === path.resolve(directory),
+        entry.length > 0 &&
+        normalizePathEntry(entry, platform) ===
+          normalizePathEntry(directory, platform),
     );
+}
+
+function envPath(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (platform !== "win32") return env.PATH;
+
+  return Object.entries(env).find(([key]) => key.toUpperCase() === "PATH")?.[1];
+}
+
+function normalizePathEntry(value: string, platform: NodeJS.Platform): string {
+  const unquoted = value.replace(/^"|"$/g, "");
+
+  return platform === "win32"
+    ? path.win32.resolve(unquoted).toLowerCase()
+    : path.resolve(unquoted);
 }
 
 async function isShellProfileConfigured(homeDir: string): Promise<boolean> {

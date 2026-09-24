@@ -68,8 +68,8 @@ export async function readTutorialRuntimeManifest(
 const COMMIT_ENV = {
   GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z",
   GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
+  GIT_CONFIG_GLOBAL: os.devNull,
+  GIT_CONFIG_SYSTEM: os.devNull,
   TZ: "UTC",
 };
 
@@ -247,11 +247,15 @@ async function makeTreeOwnerWritable(directory: string): Promise<void> {
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFilePromise("git", args, {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, ...COMMIT_ENV },
-  });
+  const { stdout } = await execFilePromise(
+    "git",
+    ["-c", "core.autocrlf=false", ...args],
+    {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, ...COMMIT_ENV },
+    },
+  );
 
   return stdout;
 }

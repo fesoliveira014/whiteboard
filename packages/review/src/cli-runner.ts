@@ -541,6 +541,10 @@ export async function runReviewCli(input: ReviewCliInput): Promise<number> {
     const { homeDir, devHome } = scope;
 
     const prompts = connectPrompts({
+      homeDir,
+      devHome,
+      cliPath: input.cliPaths?.effectivePath,
+      cliRuntimePath: process.execPath,
       legacyPaths: await scanLegacySkills(homeDir),
       hasShim: await isOwnedShim(pathShimPath(homeDir)),
       traceEnabled: await traceMachineEnabled({ homeDir, env }),

@@ -55,12 +55,47 @@ describe("resolveTraceCommand", () => {
         homeDir,
       }),
     ).toEqual({ file: "/env/review" });
-    expect(resolveTraceCommand({ env, homeDir })).toEqual({
+    expect(resolveTraceCommand({ env, homeDir, platform: "linux" })).toEqual({
       file: "whiteboard",
     });
 
     const installed = await installFile(homeDir, "whiteboard");
-    expect(resolveTraceCommand({ env, homeDir })).toEqual({ file: installed });
+    expect(resolveTraceCommand({ env, homeDir, platform: "linux" })).toEqual({
+      file: installed,
+    });
+  });
+
+  it("finds the Windows desktop launcher before a PATH install", async () => {
+    const homeDir = await tempHome();
+    const installed = await installFile(homeDir, "whiteboard.cmd");
+    expect(
+      resolveTraceCommand({ homeDir, env: {}, platform: "win32" }),
+    ).toEqual({
+      file: installed,
+    });
+    await rm(installed);
+    expect(
+      resolveTraceCommand({ homeDir, env: {}, platform: "win32" }),
+    ).toEqual({
+      file: "whiteboard.cmd",
+    });
+  });
+
+  it("uses Windows PATH separators and executable extensions", async () => {
+    const homeDir = await tempHome();
+    const command = path.join(homeDir, "npm", "whiteboard.cmd");
+    await mkdir(path.dirname(command), { recursive: true });
+    await writeFile(command, "@echo off\r\n", { mode: 0o755 });
+    expect(
+      resolveTraceCommand({
+        homeDir,
+        platform: "win32",
+        env: {
+          Path: `${path.join(homeDir, "missing")};${path.dirname(command)}`,
+          PATHEXT: ".EXE;.CMD",
+        },
+      }),
+    ).toEqual({ file: command });
   });
 
   it("reads TRACE_HOME_DIR before the OS home", () => {
@@ -102,6 +137,10 @@ it("pins an npm PATH executable when Desktop has no local launcher", async () =>
   await mkdir(path.dirname(command), { recursive: true });
   await writeFile(command, "#!/bin/sh\n", { mode: 0o755 });
   expect(
-    resolveTraceCommand({ homeDir, env: { PATH: path.dirname(command) } }),
+    resolveTraceCommand({
+      homeDir,
+      env: { PATH: path.dirname(command) },
+      platform: "linux",
+    }),
   ).toEqual({ file: command });
 });

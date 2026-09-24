@@ -1,9 +1,10 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { jsonObject, jsonString, parseJsonText } from "@dev.fast/json";
 import { git } from "@dev.fast/local-vcs";
+import spawn from "cross-spawn";
 
 import type { CliInputStream } from "./cli-output";
 import { readStoreAuth } from "./store-auth";
@@ -71,7 +72,7 @@ export function spawnDetachedTraceSync(input: {
         "--expect-storage",
         expectation,
       ],
-      { cwd: input.cwd, detached: true, stdio: "ignore" },
+      { cwd: input.cwd, detached: true, stdio: "ignore", windowsHide: true },
     );
 
     child.on("error", () => {});
